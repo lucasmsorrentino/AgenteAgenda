@@ -1,0 +1,47 @@
+# --- Secrets / runtime state ---
+.env
+.env.local
+.env.*.local
+
+# Exclude all runtime artifacts; whitelist only the schema mapping
+data/*
+!data/
+!data/anytype_schema.json
+
+# Legacy / local-only directories
+Agenda/
+.claude/
+
+# Logs
+*.log
+bot_output.log
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+ENV/
+
+# --- Editor / OS ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Test / coverage ---
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+.tox/

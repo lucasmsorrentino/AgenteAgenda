@@ -1,0 +1,27 @@
+{
+  "types": {
+    "Tarefa": "tarefa",
+    "Resumo Diario": "resumo_diario",
+    "Nota Rapida": "nota_rapida",
+    "Compromisso": "compromisso"
+  },
+  "properties": {
+    "status": "status",
+    "due_date": "due_date",
+    "completed_at": "completed_at",
+    "source": "source",
+    "calendar_event_id": "calendar_event_id",
+    "recap_date": "recap_date",
+    "events_total": "events_total",
+    "tasks_completed": "tasks_completed",
+    "tasks_missed": "tasks_missed",
+    "tags": "tags",
+    "start": "start",
+    "end": "end",
+    "location": "location",
+    "recurring": "recurring",
+    "classified_at": "classified_at",
+    "area": "area",
+    "prioridade": "prioridade"
+  }
+}
