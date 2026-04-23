@@ -88,13 +88,16 @@ async def classify_batch(anytype_client, items: list[dict]) -> dict:
     classified = 0
     failed = 0
     by_area: dict[str, int] = {}
+    details: list[dict] = []  # per-item log
 
     for obj in items:
         full_id = obj.get("id", "")
+        name = (obj.get("name") or "(sem titulo)")[:60]
         prefix = full_id[:10]
         r = by_prefix.get(prefix)
         if not r:
             failed += 1
+            details.append({"name": name, "status": "falha", "reason": "sem resposta do modelo"})
             continue
         clean = clamp_to_taxonomy(r)
         ok = anytype_client.set_classification(
@@ -107,10 +110,18 @@ async def classify_batch(anytype_client, items: list[dict]) -> dict:
         if ok:
             classified += 1
             by_area[clean["area"]] = by_area.get(clean["area"], 0) + 1
+            details.append({
+                "name": name,
+                "status": "ok",
+                "area": clean["area"],
+                "prioridade": clean["prioridade"],
+                "tags": clean["tags"],
+            })
         else:
             failed += 1
+            details.append({"name": name, "status": "falha", "reason": "erro ao salvar"})
 
-    return {"classified": classified, "failed": failed, "by_area": by_area}
+    return {"classified": classified, "failed": failed, "by_area": by_area, "details": details}
 
 
 async def classify_unclassified(anytype_client) -> dict:
@@ -120,14 +131,15 @@ async def classify_unclassified(anytype_client) -> dict:
     """
     items = anytype_client.list_unclassified()
     if not items:
-        return {"classified": 0, "failed": 0, "by_area": {}, "total": 0}
+        return {"classified": 0, "failed": 0, "by_area": {}, "total": 0, "details": []}
 
-    agg = {"classified": 0, "failed": 0, "by_area": {}, "total": len(items)}
+    agg: dict = {"classified": 0, "failed": 0, "by_area": {}, "total": len(items), "details": []}
     for i in range(0, len(items), BATCH_SIZE):
         batch = items[i : i + BATCH_SIZE]
         counts = await classify_batch(anytype_client, batch)
         agg["classified"] += counts["classified"]
         agg["failed"] += counts["failed"]
+        agg["details"].extend(counts.get("details", []))
         for k, v in counts["by_area"].items():
             agg["by_area"][k] = agg["by_area"].get(k, 0) + v
     return agg

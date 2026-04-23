@@ -48,7 +48,7 @@ Allowed actions:
 - create_appointment: real calendar event. Required: title, start (ISO8601 with tz offset). Optional: end, location, recurrence (RRULE body without prefix).
 - create_task: TODO with deadline. Required: title. Optional: start (deadline).
 - create_note: quick note. Required: title. Optional: body.
-- update_event: edit an existing event. Required: event_id_prefix (6-char), fields ({{titulo?, inicio?, fim?, local?}}).
+- update_event: edit an existing event. Required: event_id_prefix (6-char), fields ({{titulo?, inicio?, fim?, local?, recurrence?}}). `recurrence` is an RRULE body without the "RRULE:" prefix (e.g. "FREQ=WEEKLY;INTERVAL=3;UNTIL=20280418T235959Z"). Use it to add/change/remove a recurrence rule on an existing event.
 - cancel_event: Required: event_id_prefix.
 - unknown: if you can't parse. Put the explanation in `reply`.
 

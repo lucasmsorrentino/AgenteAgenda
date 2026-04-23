@@ -241,7 +241,12 @@ class ProductivityBot:
         return app
 
     async def run(self) -> None:
-        """Start the bot polling loop."""
+        """Start the bot polling loop with conflict detection.
+
+        If a Telegram conflict error (HTTP 409) is detected, it means another
+        instance is polling. We raise immediately so the outer restart loop
+        in run_bot.py can back off and retry.
+        """
         if not TELEGRAM_BOT_TOKEN:
             logger.error("TELEGRAM_BOT_TOKEN not configured")
             return
@@ -278,6 +283,10 @@ class ProductivityBot:
         logger.info("Bot polling started. Press Ctrl+C to stop.")
         while self._running:
             await asyncio.sleep(1)
+            # Check if the updater died (e.g. conflict error)
+            if self._app and self._app.updater and not self._app.updater.running:
+                logger.error("Updater stopped unexpectedly — will trigger restart")
+                raise RuntimeError("Telegram updater stopped (possible conflict)")
 
     async def stop(self) -> None:
         """Stop the bot gracefully."""
@@ -388,19 +397,49 @@ class ProductivityBot:
             return
         await self._send(
             update.message.chat_id,
-            "<b>Comandos:</b>\n\n"
-            "/today — Agenda + tarefas de hoje\n"
-            "/todos — Lista de tarefas pendentes\n"
-            "/prazos — Ver todos os prazos proximos\n"
-            "/add Tarefa @prazo — Nova tarefa com prazo\n"
-            "/note Texto — Salvar nota no Anytype\n"
-            "/done 3 — Marcar tarefa #3 como concluida\n"
-            "/recap — Gerar resumo do dia\n\n"
-            "<b>Formatos de prazo:</b>\n"
-            "  @14:30 — hoje\n"
-            "  @15/04 — dia especifico\n"
-            "  @15/04 17:00 — dia + hora\n"
-            "  @amanha 09:00\n"
+            "<b>📅 Agenda &amp; visualizacao</b>\n"
+            "/today — agenda + tarefas de hoje\n"
+            "/todos — tarefas pendentes de hoje\n"
+            "/prazos — prazos dos proximos 60 dias agrupados por urgencia\n"
+            "/agenda [dias] — compromissos futuros (default 7, max 60). Mostra id de 6 chars usado em /editar e /cancelar\n"
+            "\n"
+            "<b>✅ Tarefas</b>\n"
+            "/add &lt;texto&gt; [@prazo] — cria tarefa (Calendar [TODO] + Anytype). Sem @prazo = sem prazo\n"
+            "/done &lt;N&gt; — conclui a tarefa N da lista do /todos\n"
+            "/note &lt;texto&gt; — salva nota no Anytype. 1ª linha = titulo, resto = corpo. #hashtags viram tags\n"
+            "\n"
+            "<b>🗓 Compromissos (Google Calendar)</b>\n"
+            "/novo &lt;texto&gt; @quando [ate HH:MM] [em &lt;local&gt;] [repete &lt;regra&gt;]\n"
+            "  • ordem fixa: ate → em → repete (repete sempre por ultimo)\n"
+            "  • sem <code>ate</code>: dura 1h. Sem <code>repete</code>: evento unico\n"
+            "/editar &lt;id&gt; campo=valor [campo=valor ...]\n"
+            "  • campos: <code>titulo</code>, <code>inicio</code> (DD/MM HH:MM), <code>fim</code> (HH:MM), <code>local</code>\n"
+            "  • recorrentes: pergunta escopo (so esta vs serie toda) via botoes\n"
+            "/cancelar &lt;id&gt; — cancela. Recorrentes: pergunta escopo\n"
+            "\n"
+            "<b>🧠 IA (usa Claude CLI)</b>\n"
+            "/ia &lt;texto livre&gt; — cria/edita/cancela em linguagem natural. Ja classifica\n"
+            "  ex: <i>marca dentista quarta 14h</i> | <i>cancela reuniao de amanha</i>\n"
+            "/buscar &lt;pergunta&gt; — busca em Anytype + Calendar (-7d/+60d), responde em pt-BR\n"
+            "/classificar — classifica em lote items do Anytype sem <code>classified_at</code>\n"
+            "\n"
+            "<b>⚙️ Sistema</b>\n"
+            "/sync — sincroniza Calendar → Anytype agora (roda automatico a cada 6h)\n"
+            "/recap — gera resumo do dia\n"
+            "/allowlist [add|remove &lt;chat_id&gt;] — gerencia acessos (so dono)\n"
+            "/start — boas-vindas + mostra seu chat_id\n"
+            "/help — esta mensagem\n"
+            "\n"
+            "<b>🕒 Formatos de @prazo / @quando</b>\n"
+            "  <code>@HH:MM</code> — hoje (ou amanha se ja passou)\n"
+            "  <code>@DD/MM</code> — dia especifico (default 23:59)\n"
+            "  <code>@DD/MM HH:MM</code> — dia + hora\n"
+            "  <code>@DD/MM/AAAA HH:MM</code> — data completa + hora\n"
+            "  <code>@amanha</code> ou <code>@amanha HH:MM</code>\n"
+            "\n"
+            "<b>🔁 Regras de <code>repete</code> (pt-BR)</b>\n"
+            "  <code>diario</code> | <code>dias uteis</code> | <code>semanal</code> | <code>mensal dia 15</code>\n"
+            "  <code>toda seg, qua, sex</code> | <code>semanal ate 30/06</code> | <code>diario 10 vezes</code>\n"
         )
 
     async def _cmd_today(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -972,6 +1011,17 @@ class ProductivityBot:
         if "local" in fields:
             update_kwargs["location"] = fields["local"]
 
+        rrule_raw = fields.get("recurrence") or fields.get("repete")
+        if rrule_raw:
+            from services.recurrence import parse_recurrence
+            body = rrule_raw.strip()
+            if body.upper().startswith("RRULE:"):
+                body = body[6:]
+            if not body.upper().startswith("FREQ="):
+                body = parse_recurrence(body) or ""
+            if body:
+                update_kwargs["recurrence"] = [f"RRULE:{body}"]
+
         if "inicio" in fields or "fim" in fields:
             current = self.calendar.get_event_raw(event_id)
             cur_start = datetime.fromisoformat(current["start"]["dateTime"])
@@ -1088,7 +1138,7 @@ class ProductivityBot:
 
     # --- AI-powered commands (/ia, /classificar, /buscar) ---
 
-    async def _build_agenda_snippet(self, days_forward: int = 14) -> str:
+    async def _build_agenda_snippet(self, days_forward: int = 30) -> str:
         """Compact agenda block for grounding /ia resolutions ('a reuniao de amanha')."""
         if not self.calendar:
             return ""
@@ -1235,7 +1285,9 @@ class ProductivityBot:
 
         if act == "update_event":
             prefix = action.get("event_id_prefix") or ""
-            fields = action.get("fields") or {}
+            fields = dict(action.get("fields") or {})
+            if action.get("recurrence") and "recurrence" not in fields and "repete" not in fields:
+                fields["recurrence"] = action["recurrence"]
             if not prefix or not fields:
                 return "Modelo nao forneceu id/campos para edicao."
             ev = await self._resolve_event_by_prefix(chat_id, prefix)
@@ -1305,16 +1357,39 @@ class ProductivityBot:
             await self._send(chat_id, "Nada a classificar — todos os itens ja tem label.")
             return
 
+        # Build detailed log
+        lines = ["<b>🏷 Classificacao concluida</b>\n"]
+        details = counts.get("details", [])
+        for d in details:
+            if d["status"] == "ok":
+                tags_str = ", ".join(d["tags"]) if d.get("tags") else ""
+                tag_part = f" [{tags_str}]" if tags_str else ""
+                lines.append(
+                    f"  ✅ <b>{d['name']}</b>\n"
+                    f"      {d['area']} · {d['prioridade']}{tag_part}"
+                )
+            else:
+                lines.append(f"  ❌ {d['name']} — {d.get('reason', '?')}")
+
         by_area = counts["by_area"]
         breakdown = ", ".join(f"{v} {k}" for k, v in sorted(by_area.items(), key=lambda x: -x[1])) or "-"
-        await self._send(
-            chat_id,
-            f"<b>Classificacao concluida</b>\n"
-            f"  Processados: {counts['total']}\n"
-            f"  Classificados: {counts['classified']}\n"
-            f"  Falhas: {counts['failed']}\n"
-            f"  Por area: {breakdown}",
+        lines.append(
+            f"\n<b>Resumo:</b> {counts['classified']}/{counts['total']} classificados"
+            f" | {counts['failed']} falha(s)"
+            f"\n<b>Por area:</b> {breakdown}"
         )
+
+        msg = "\n".join(lines)
+        # Split if too long for Telegram
+        if len(msg) > TELEGRAM_MAX_MESSAGE_LEN:
+            # Send details first, then summary
+            detail_msg = "\n".join(lines[:-1])
+            summary_msg = lines[-1]
+            for chunk_start in range(0, len(detail_msg), TELEGRAM_MAX_MESSAGE_LEN):
+                await self._send(chat_id, detail_msg[chunk_start:chunk_start + TELEGRAM_MAX_MESSAGE_LEN])
+            await self._send(chat_id, summary_msg)
+        else:
+            await self._send(chat_id, msg)
 
     async def _cmd_buscar(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Natural-language search across Anytype + Calendar."""

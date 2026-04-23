@@ -20,7 +20,7 @@ python scripts/setup_anytype.py     # Anytype local API auth + schema → data/a
 # Main bot (long-polling + scheduled reminders + calendar sync)
 python scripts/run_bot.py
 
-# Standalone jobs (designed to be called by cron / Claude Scheduled Tasks)
+# Standalone jobs (on-demand only, no scheduler)
 python scripts/run_morning.py       # Morning summary → Telegram
 python scripts/run_evening.py       # Evening recap → Telegram
 python scripts/run_classify.py      # Classifies unclassified Anytype items via `claude -p`
@@ -42,7 +42,7 @@ Three integration clients, composed by services, orchestrated by scripts:
   - `recurrence.py` — parses Portuguese phrases ("toda seg, qua", "mensal dia 15", "diario ate 30/06") into RFC 5545 RRULE strings used by `GoogleCalendarClient.create_event`.
   - `ai_subprocess.py` — invokes `claude -p <prompt> --output-format json` as a subprocess, unwraps the envelope, extracts the JSON payload. Uses the user's Claude Code Max quota (no API key). `run_claude(prompt, timeout=90)` is the only entry point.
   - `ai_parser.py` — parses `/ia` free-text messages into a structured action (`create_appointment|create_task|create_note|update_event|cancel_event|unknown`) plus taxonomy tags. Grounded with a short agenda snippet so the LLM can resolve references like "a reuniao de amanha".
-  - `ai_classifier.py` — batch classifier. Reads items with empty `classified_at`, sends them all in one LLM call, writes back `area`/`prioridade`/`tags`/`classified_at`. `clamp_to_taxonomy()` is the public helper both the batch flow and `/ia` use to sanitize LLM output against `config/labels.py`.
+  - `ai_classifier.py` — batch classifier. Reads items with empty `classified_at`, sends them all in one LLM call, writes back `area`/`prioridade`/`tags`/`classified_at`. `clamp_to_taxonomy()` is the public helper both the batch flow and `/ia` use to sanitize LLM output against `config/labels.py`. Returns per-item `details` list with name/area/prioridade/tags for the detailed log shown via `/classificar` and CLI.
   - `ai_search.py` — `/buscar` handler. Fetches recent tasks/notes/compromissos + calendar window, asks Claude to answer in pt-BR, returns `{answer, cited_ids}`.
   - `morning_summary.py` / `evening_recap.py` — compose daily messages.
   - `reminders.py` — `check_and_send_reminders()` is invoked every 10 min by APScheduler from `run_bot.py`.
@@ -51,6 +51,8 @@ Three integration clients, composed by services, orchestrated by scripts:
 - **`config/labels.py`** — closed taxonomy (`AREAS`, `PRIORIDADES`, `TAGS`) used by the AI classifier and `/ia`. Both the prompt and the sanitizer read from here, so edits take effect immediately for new classifications.
 
 - **`scripts/run_bot.py`** is the orchestrator: authenticates Calendar + Anytype, constructs `ProductivityBot`, and attaches two APScheduler jobs (reminders every 10 min, calendar sync every 6 h). Each integration is optional — if auth fails, the bot continues without it (degrades gracefully). Edits made via `/novo`, `/editar` and `/cancelar` also trigger an incremental sync of just the touched event IDs, so the 6 h schedule only handles drift from external Calendar edits.
+
+- **`scripts/start_bot.ps1`** — PowerShell launcher for Windows Task Scheduler / Startup. Sets working directory, rotates logs (>5 MB), and delegates to `run_bot.py`. A VBS shim in `shell:startup` calls this script silently on login.
 
 ## Telegram commands for appointments
 
@@ -65,7 +67,7 @@ Three integration clients, composed by services, orchestrated by scripts:
 All three use `services/ai_subprocess.run_claude()` — no API key, uses the local `claude` CLI + the user's Max subscription quota. Calls are stateless (no session memory across invocations).
 
 - `/ia <texto livre>` — one-shot parser. Creates appointments/tasks/notes or edits/cancels events in natural language. Always returns taxonomy labels in the same call, so items created through `/ia` are classified immediately (no extra subprocess).
-- `/classificar` — batch-classifies every Anytype item with empty `classified_at`. Runs only on manual trigger (no scheduler). One LLM call per batch of ~80 items; reports counts by area in the reply.
+- `/classificar` — batch-classifies every Anytype item with empty `classified_at`. On-demand only (no scheduler). One LLM call per batch of ~80 items; returns a detailed per-item log (name, area, prioridade, tags) plus summary counts.
 - `/buscar <pergunta>` — natural-language search over Anytype items + calendar window (last 7d, next 60d). Returns an answer in pt-BR + 6-char id prefixes for cited items.
 
 The `classified_at` date property is the single source of truth for "already classified". `/ia`, `/classificar`, and calendar sync all set it; `list_unclassified()` in `anytype_client.py` uses its absence to build the batch queue.
@@ -73,6 +75,18 @@ The `classified_at` date property is the single source of truth for "already cla
 - **`models/schemas.py`** — Pydantic models (`Event`, `Task`, `DailyRecap`, `ReminderAction`) shared across services.
 
 - **`config/settings.py`** — single source of env vars; loads `.env` from project root. All modules import from here rather than calling `os.getenv` directly.
+
+## Bot reliability
+
+`run_bot.py` includes several mechanisms to keep the bot alive:
+
+- **Windows file lock (`msvcrt.locking`)** — prevents multiple instances from polling Telegram simultaneously (which causes HTTP 409 Conflict). The lock is held as long as the process is alive; a second `run_bot.py` exits immediately with an error.
+- **Auto-restart with exponential backoff** — on unhandled crash, the process sleeps (5s → 10s → … → 5min cap) then restarts. If the bot was healthy for 2+ minutes before crashing, backoff resets to 5s (transient error).
+- **Updater health check** — the polling loop checks every second if the Telegram updater is still running; if it died silently (e.g. conflict), it raises to trigger the restart loop.
+- **Auto-start on login** — a VBS shim in `shell:startup` (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\ProductivityBot.vbs`) launches `scripts/start_bot.ps1` silently. The PS1 script sets the working directory, rotates logs (>5 MB), and runs `python scripts/run_bot.py` with output piped to `data/bot_output.log`.
+- **Graceful shutdown** — SIGINT and SIGTERM release the lock and exit cleanly.
+
+Logs: `data/bot_stderr.log` (loguru output), `data/bot_output.log` (launcher wrapper).
 
 ## Conventions
 

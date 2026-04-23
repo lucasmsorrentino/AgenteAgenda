@@ -6,32 +6,98 @@ Usage:
 
 The bot runs in long-polling mode (no public IP needed).
 APScheduler checks for upcoming events every 10 minutes and sends reminders.
+
+Reliability features:
+- Windows file lock prevents multiple instances (avoids Telegram getUpdates conflicts)
+- Auto-restart with exponential backoff on crash (up to 5 min cap)
+- Graceful shutdown on SIGINT/SIGTERM
+- All integrations optional (degrades gracefully)
 """
 
 from __future__ import annotations
 
 import asyncio
+import msvcrt
+import os
+import signal
 import sys
+import time
 from pathlib import Path
 
 # Add project root to path so we can import our modules
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
 from config.settings import ANYTYPE_API_KEY, ANYTYPE_SPACE_ID, TIMEZONE
-from integrations.anytype_client import AnytypeClient
-from integrations.google_calendar import GoogleCalendarClient
-from integrations.telegram_bot import ProductivityBot
-from services.calendar_sync import sync_calendar_to_anytype
-from services.reminders import check_and_send_reminders
+
+# --- Windows file lock to prevent multiple instances ---
+
+LOCK_FILE = Path(__file__).resolve().parent.parent / "data" / "bot.lock"
+_lock_fh = None  # keep file handle open for the lock's lifetime
 
 
-async def main():
-    """Initialize all integrations and start the bot."""
-    logger.info("Starting Productivity Bot...")
+def _acquire_lock() -> bool:
+    """Acquire an exclusive file lock. Returns True if successful.
+
+    Uses msvcrt.locking() which is a true OS-level lock on Windows.
+    The lock is held as long as the file handle stays open.
+    If another process holds the lock, LK_NBLCK raises IOError immediately.
+    """
+    global _lock_fh
+    LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        _lock_fh = open(LOCK_FILE, "w")
+        msvcrt.locking(_lock_fh.fileno(), msvcrt.LK_NBLCK, 1)
+        _lock_fh.write(str(os.getpid()))
+        _lock_fh.flush()
+        logger.info("Lock acquired (PID {})", os.getpid())
+        return True
+    except (IOError, OSError):
+        logger.error(
+            "Another bot instance is already running. "
+            "Kill it first or delete data/bot.lock if stale."
+        )
+        if _lock_fh:
+            _lock_fh.close()
+            _lock_fh = None
+        return False
+
+
+def _release_lock() -> None:
+    """Release the file lock and clean up."""
+    global _lock_fh
+    if _lock_fh:
+        try:
+            msvcrt.locking(_lock_fh.fileno(), msvcrt.LK_UNLCK, 1)
+            _lock_fh.close()
+        except Exception:
+            pass
+        _lock_fh = None
+    try:
+        if LOCK_FILE.exists():
+            LOCK_FILE.unlink()
+    except Exception:
+        pass
+    logger.info("Lock released")
+
+
+# --- Main bot setup ---
+
+
+async def _start_bot() -> None:
+    """Initialize all integrations and run the bot. Raises on fatal error."""
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    from integrations.anytype_client import AnytypeClient
+    from integrations.google_calendar import GoogleCalendarClient
+    from integrations.telegram_bot import ProductivityBot
+    from services.calendar_sync import sync_calendar_to_anytype
+    from services.reminders import check_and_send_reminders
+
+    logger.info("Starting Productivity Bot (PID {})...", os.getpid())
 
     # --- Google Calendar ---
     calendar = None
@@ -41,10 +107,10 @@ async def main():
         logger.info("Google Calendar: OK")
     except FileNotFoundError as e:
         logger.warning("Google Calendar: {} — running without calendar", e)
-        calendar = None
     except Exception as e:
-        logger.warning("Google Calendar auth failed: {} — running without calendar", e)
-        calendar = None
+        logger.warning(
+            "Google Calendar auth failed: {} — running without calendar", e
+        )
 
     # --- Anytype ---
     anytype = None
@@ -69,7 +135,8 @@ async def main():
 
     if calendar:
         scheduler.add_job(
-            lambda: asyncio.create_task(check_and_send_reminders(calendar, bot)),
+            check_and_send_reminders,
+            args=[calendar, bot],
             trigger=IntervalTrigger(minutes=10),
             id="reminder_check",
             name="Check upcoming events",
@@ -79,7 +146,8 @@ async def main():
 
     if calendar and anytype:
         scheduler.add_job(
-            lambda: asyncio.create_task(sync_calendar_to_anytype(calendar, anytype)),
+            sync_calendar_to_anytype,
+            args=[calendar, anytype],
             trigger=IntervalTrigger(hours=6),
             id="calendar_sync",
             name="Sync Calendar to Anytype",
@@ -92,8 +160,6 @@ async def main():
     # --- Run the bot ---
     try:
         await bot.run()
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")
     finally:
         scheduler.shutdown(wait=False)
         await bot.stop()
@@ -102,8 +168,67 @@ async def main():
         logger.info("Bot stopped.")
 
 
-if __name__ == "__main__":
+# --- Auto-restart loop ---
+
+MAX_BACKOFF = 300  # 5 minutes cap
+INITIAL_BACKOFF = 5  # start at 5 seconds
+HEALTHY_THRESHOLD = 120  # if bot ran for 2+ min, reset backoff
+
+
+def main() -> None:
+    """Run the bot with auto-restart on crash."""
+    if not _acquire_lock():
+        sys.exit(1)
+
+    # Handle SIGTERM (from Task Scheduler stop / kill) gracefully
+    def _handle_signal(sig, frame):
+        logger.info("Received signal {}, shutting down...", sig)
+        _release_lock()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
+
+    backoff = INITIAL_BACKOFF
+    restart_count = 0
+
     try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\nBot encerrado.")
+        while True:
+            start_time = time.monotonic()
+            restart_count += 1
+
+            try:
+                logger.info("=== Bot starting (attempt #{}) ===", restart_count)
+                asyncio.run(_start_bot())
+                # Clean exit (e.g. Ctrl+C handled inside) — stop
+                logger.info("Bot exited cleanly.")
+                break
+
+            except KeyboardInterrupt:
+                logger.info("Interrupted by user.")
+                break
+
+            except SystemExit:
+                break
+
+            except Exception as e:
+                elapsed = time.monotonic() - start_time
+                logger.error("Bot crashed after {:.0f}s: {}", elapsed, e)
+
+                # If it ran for a while, the crash is likely transient — reset backoff
+                if elapsed >= HEALTHY_THRESHOLD:
+                    backoff = INITIAL_BACKOFF
+                    logger.info(
+                        "Was healthy for {}s, resetting backoff", int(elapsed)
+                    )
+                else:
+                    backoff = min(backoff * 2, MAX_BACKOFF)
+
+                logger.info("Restarting in {}s...", backoff)
+                time.sleep(backoff)
+    finally:
+        _release_lock()
+
+
+if __name__ == "__main__":
+    main()

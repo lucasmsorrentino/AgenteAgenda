@@ -42,12 +42,22 @@ async def _run() -> int:
         print("Nada a classificar — todos os itens ja tem label.")
         return 0
 
-    logger.info(
-        "Classificacao: {} processados, {} classificados, {} falhas",
-        counts["total"], counts["classified"], counts["failed"],
-    )
-    print(f"Processados: {counts['total']}")
-    print(f"Classificados: {counts['classified']}")
+    # Detailed log
+    details = counts.get("details", [])
+    print(f"\n{'='*50}")
+    print(f" Classificacao — {counts['total']} item(ns)")
+    print(f"{'='*50}\n")
+
+    for d in details:
+        if d["status"] == "ok":
+            tags_str = f" [{', '.join(d['tags'])}]" if d.get("tags") else ""
+            print(f"  OK  {d['name']}")
+            print(f"      -> {d['area']} | {d['prioridade']}{tags_str}")
+        else:
+            print(f"  FALHA  {d['name']} — {d.get('reason', '?')}")
+
+    print(f"\n{'─'*50}")
+    print(f"Classificados: {counts['classified']}/{counts['total']}")
     print(f"Falhas: {counts['failed']}")
     if counts["by_area"]:
         print("Por area:")
