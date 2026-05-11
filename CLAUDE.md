@@ -24,9 +24,27 @@ python scripts/run_bot.py
 python scripts/run_morning.py       # Morning summary → Telegram
 python scripts/run_evening.py       # Evening recap → Telegram
 python scripts/run_classify.py      # Classifies unclassified Anytype items via `claude -p`
+
+# One-time setup: weekly workout plan (Mon-Fri) in Anytype + optional recurring GCal events
+python scripts/setup_workout.py [--calendar] [--time HH:MM] [--duration MIN] [--force]
 ```
 
 No test suite or linter is configured.
+
+## Workout module
+
+`scripts/setup_workout.py` provisions a weekly 5-day workout plan as 5 fixed
+Anytype Page objects (one per weekday) plus optional 5 weekly-recurring Google
+Calendar events. The exercise sequence and design were agreed in the
+`claude/workout-plan-anytype-kIgOj` discussion — see `NEXT_SESSION.md` for the
+one-time execution instructions if the script hasn't been run yet on the home
+machine.
+
+Key design choices:
+- **One object per weekday** (Option B): 5 fixed pages named `Treino - <Dia> - <Levantamento>`. Each session reuses the same page — `Carga atual: _____` is edited in-place so it always reflects the most recent load. Past sessions are appended manually to a `## Histórico` section in a pipe-delimited format that's easy for an agent to parse later.
+- **Sequence** (rotated −1 from the original template): Seg=Barra Fixa, Ter=Agachamento, Qua=Supino Reto, Qui=Levantamento Terra (2×5), Sex=Militar (OHP).
+- **No timer in Anytype** — it has no automation primitives. User runs an external interval-timer app (2 min between main-lift sets, 1 min between accessories). The descanso convention is documented inline in each page body.
+- **Idempotent**: re-runs skip pages that already exist by exact name. `--force` recreates anyway.
 
 ## Architecture
 
