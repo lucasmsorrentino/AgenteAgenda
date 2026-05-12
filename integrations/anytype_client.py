@@ -203,7 +203,7 @@ class AnytypeClient:
         try:
             params: dict = {"query": query, "limit": limit}
             if types:
-                params["types"] = ",".join(types)
+                params["types"] = types
             resp = self.client.post(self._space_url("search"), json=params)
             resp.raise_for_status()
             return resp.json().get("data", [])
