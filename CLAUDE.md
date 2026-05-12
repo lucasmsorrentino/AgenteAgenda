@@ -42,7 +42,7 @@ machine.
 
 Key design choices:
 - **One object per weekday** (Option B): 5 fixed pages named `Treino - <Dia> - <Levantamento>`. Each session reuses the same page — `Carga atual: _____` is edited in-place so it always reflects the most recent load. Past sessions are appended manually to a `## Histórico` section in a pipe-delimited format that's easy for an agent to parse later.
-- **Sequence** (rotated −1 from the original template): Seg=Barra Fixa, Ter=Agachamento, Qua=Supino Reto, Qui=Levantamento Terra (2×5), Sex=Militar (OHP).
+- **Sequence** (natural template starting with Squat on Monday): Seg=Agachamento, Ter=Supino Reto, Qua=Levantamento Terra (2×5), Qui=Militar (OHP), Sex=Barra Fixa.
 - **No timer in Anytype** — it has no automation primitives. User runs an external interval-timer app (2 min between main-lift sets, 1 min between accessories). The descanso convention is documented inline in each page body.
 - **Idempotent**: re-runs skip pages that already exist by exact name. `--force` recreates anyway.
 

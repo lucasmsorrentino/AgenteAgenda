@@ -7,13 +7,12 @@ accessory/core, and a "Histórico" section for manual log entries.
 Optionally creates 5 weekly-recurring Google Calendar events with a one-line
 summary of each day's main lift.
 
-Sequence: rotated -1 from the original template so Friday's pull-up day
-lands on Monday. Then the order continues:
-  Mon  Barra Fixa (Carga)
-  Ter  Agachamento
-  Qua  Supino Reto
-  Qui  Levantamento Terra (2x5)
-  Sex  Militar (OHP)
+Sequence: natural template starting with Squat on Monday.
+  Seg  Agachamento
+  Ter  Supino Reto
+  Qua  Levantamento Terra (2x5)
+  Qui  Militar (OHP)
+  Sex  Barra Fixa (Carga)
 
 Persistence model: ONE object per weekday (Option B from design). The
 "Carga atual" line is edited in-place each session — it always reflects
@@ -54,29 +53,12 @@ from integrations.anytype_client import AnytypeClient
 
 
 # --- Workout definitions ---
-# Order: starts with Friday's pull-up day on Monday, then rotates.
+# Order: natural sequence starting with Squat on Monday.
 WORKOUTS: list[dict] = [
     {
         "weekday_pt": "Segunda",
         "byday": "MO",
         "weekday_idx": 0,  # Monday=0 in datetime.weekday()
-        "main": {
-            "name": "Barra Fixa",
-            "sets": 5,
-            "reps": 5,
-            "weight_label": "Carga (lastro)",
-            "uses_weight": True,
-        },
-        "mobility": ["Alongamento de punhos", "Espalmada na parede"],
-        "accessories": [
-            {"name": "Paralelas", "sets": 3, "weight_label": "Carga (lastro)", "uses_weight": True},
-            {"name": "Abdominal Bicicleta", "sets": 3, "uses_weight": False},
-        ],
-    },
-    {
-        "weekday_pt": "Terça",
-        "byday": "TU",
-        "weekday_idx": 1,
         "main": {
             "name": "Agachamento",
             "sets": 5,
@@ -90,9 +72,9 @@ WORKOUTS: list[dict] = [
         ],
     },
     {
-        "weekday_pt": "Quarta",
-        "byday": "WE",
-        "weekday_idx": 2,
+        "weekday_pt": "Terça",
+        "byday": "TU",
+        "weekday_idx": 1,
         "main": {
             "name": "Supino Reto",
             "sets": 5,
@@ -107,9 +89,9 @@ WORKOUTS: list[dict] = [
         ],
     },
     {
-        "weekday_pt": "Quinta",
-        "byday": "TH",
-        "weekday_idx": 3,
+        "weekday_pt": "Quarta",
+        "byday": "WE",
+        "weekday_idx": 2,
         "main": {
             "name": "Levantamento Terra",
             "sets": 2,
@@ -123,9 +105,9 @@ WORKOUTS: list[dict] = [
         ],
     },
     {
-        "weekday_pt": "Sexta",
-        "byday": "FR",
-        "weekday_idx": 4,
+        "weekday_pt": "Quinta",
+        "byday": "TH",
+        "weekday_idx": 3,
         "main": {
             "name": "Militar (OHP)",
             "sets": 5,
@@ -137,6 +119,23 @@ WORKOUTS: list[dict] = [
         "accessories": [
             {"name": "Remada Curvada", "sets": 3, "weight_label": "Carga (kg)", "uses_weight": True},
             {"name": "Prancha", "sets": 3, "uses_weight": False},
+        ],
+    },
+    {
+        "weekday_pt": "Sexta",
+        "byday": "FR",
+        "weekday_idx": 4,
+        "main": {
+            "name": "Barra Fixa",
+            "sets": 5,
+            "reps": 5,
+            "weight_label": "Carga (lastro)",
+            "uses_weight": True,
+        },
+        "mobility": ["Alongamento de punhos", "Espalmada na parede"],
+        "accessories": [
+            {"name": "Paralelas", "sets": 3, "weight_label": "Carga (lastro)", "uses_weight": True},
+            {"name": "Abdominal Bicicleta", "sets": 3, "uses_weight": False},
         ],
     },
 ]
