@@ -35,16 +35,15 @@ No test suite or linter is configured.
 
 `scripts/setup_workout.py` provisions a weekly 5-day workout plan as 5 fixed
 Anytype Page objects (one per weekday) plus optional 5 weekly-recurring Google
-Calendar events. The exercise sequence and design were agreed in the
-`claude/workout-plan-anytype-kIgOj` discussion — see `NEXT_SESSION.md` for the
-one-time execution instructions if the script hasn't been run yet on the home
-machine.
+Calendar events. The current plan is the home/bodyweight **Treino Casa ABCDE**
+(peso corporal, no gym) — see `NEXT_SESSION.md` for the one-time execution
+instructions if the script hasn't been run yet on the home machine.
 
 Key design choices:
-- **One object per weekday** (Option B): 5 fixed pages named `Treino - <Dia> - <Levantamento>`. Each session reuses the same page — `Carga atual: _____` is edited in-place so it always reflects the most recent load. Past sessions are appended manually to a `## Histórico` section in a pipe-delimited format that's easy for an agent to parse later.
-- **Sequence** (natural template starting with Squat on Monday): Seg=Agachamento, Ter=Supino Reto, Qua=Levantamento Terra (2×5), Qui=Militar (OHP), Sex=Barra Fixa.
-- **No timer in Anytype** — it has no automation primitives. User runs an external interval-timer app (2 min between main-lift sets, 1 min between accessories). The descanso convention is documented inline in each page body.
-- **Idempotent**: re-runs skip pages that already exist by exact name. `--force` recreates anyway.
+- **One object per weekday** (Option B): 5 fixed pages named `Treino - <Dia> - <Letra>: <Foco>` (e.g. `Treino - Segunda - A: Inferiores`). Each session reuses the same page — `Carga (mochila): _____` is edited in-place so it always reflects the most recent load. Past sessions are appended manually to a `## Histórico` section in a pipe-delimited format that's easy for an agent to parse later.
+- **Sequence** (ABCDE split, peso corporal): Seg=A Inferiores (Quad/Glúteo), Ter=B Empurrar (Peito/Ombro/Tríceps), Qua=C Puxar (Costas/Bíceps), Qui=D Cadeia Posterior + Core, Sex=E Metabólico (circuito 4-5 voltas). Each non-circuit exercise renders one checkbox per série; the metabólico day renders one checkbox per volta.
+- **Swap by default**: the script replaces any previous plan. It deletes Anytype pages whose name starts with `Treino - ` that aren't in the new set, and (with `--calendar`) cancels old recurring `Treino` series, before/while creating the new ones. `--keep-old` adds the new plan without removing the old; `--force` recreates new pages even if same-named ones exist.
+- **No timer in Anytype** — it has no automation primitives. User runs an external interval-timer app (60-90s between séries; no rest inside the circuit, 60-90s between voltas). The descanso convention is documented inline in each page body.
 
 ## Architecture
 
