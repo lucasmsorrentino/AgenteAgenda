@@ -37,6 +37,20 @@ ANYTYPE_API_KEY: str = os.getenv("ANYTYPE_API_KEY", "")
 ANYTYPE_API_VERSION: str = os.getenv("ANYTYPE_API_VERSION", "2025-11-08")
 ANYTYPE_SPACE_ID: str = os.getenv("ANYTYPE_SPACE_ID", "")
 
+# --- Knowledge backend selector ---
+# "obsidian" (default) or "anytype". Obsidian needs no running daemon.
+KNOWLEDGE_BACKEND: str = os.getenv("KNOWLEDGE_BACKEND", "obsidian")
+
+# --- Obsidian (filesystem vault, replacement for Anytype) ---
+OBSIDIAN_VAULT_PATH: str = os.getenv(
+    "OBSIDIAN_VAULT_PATH",
+    str(Path.home() / "ai_os"),
+)
+# All agenda notes live under this subfolder of the vault (its own "section",
+# like the Anytype space): agenda/tarefas, agenda/compromissos, agenda/notas,
+# agenda/recaps.
+OBSIDIAN_AGENDA_SUBDIR: str = os.getenv("OBSIDIAN_AGENDA_SUBDIR", "agenda")
+
 # --- General ---
 TIMEZONE: str = os.getenv("TIMEZONE", "America/Sao_Paulo")
 REMINDER_MINUTES_BEFORE: int = int(os.getenv("REMINDER_MINUTES_BEFORE", "15"))

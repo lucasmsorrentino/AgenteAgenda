@@ -15,9 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from loguru import logger
 
-from config.settings import ANYTYPE_API_KEY, ANYTYPE_SPACE_ID
-from integrations.anytype_client import AnytypeClient
 from integrations.google_calendar import GoogleCalendarClient
+from integrations.knowledge import get_knowledge_client
 from integrations.telegram_bot import send_telegram_message
 from services.evening_recap import generate_evening_recap
 
@@ -33,15 +32,11 @@ async def main():
     except Exception as e:
         logger.warning("Calendar unavailable: {}", e)
 
-    # Anytype
-    anytype = None
-    if ANYTYPE_API_KEY and ANYTYPE_SPACE_ID:
-        anytype = AnytypeClient()
-        if not anytype.verify_connection():
-            anytype = None
+    # Knowledge store (Obsidian by default)
+    knowledge = get_knowledge_client(verbose=False)
 
     # Generate and send
-    text = await generate_evening_recap(calendar, anytype)
+    text = await generate_evening_recap(calendar, knowledge)
     await send_telegram_message(text)
     logger.info("Evening recap sent!")
 

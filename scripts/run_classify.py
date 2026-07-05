@@ -18,25 +18,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from loguru import logger
 
-from config.settings import ANYTYPE_API_KEY, ANYTYPE_SPACE_ID
-from integrations.anytype_client import AnytypeClient
+from integrations.knowledge import get_knowledge_client
 from services.ai_classifier import classify_unclassified
 
 
 async def _run() -> int:
-    if not ANYTYPE_API_KEY or not ANYTYPE_SPACE_ID:
-        print("ANYTYPE_API_KEY/ANYTYPE_SPACE_ID nao configurados no .env")
-        return 1
-
-    anytype = AnytypeClient()
-    if not anytype.verify_connection():
-        print("Nao consegui conectar no Anytype.")
+    knowledge = get_knowledge_client(verbose=False)
+    if knowledge is None:
+        print("Nenhum knowledge store disponivel (Obsidian/Anytype).")
         return 1
 
     try:
-        counts = await classify_unclassified(anytype)
+        counts = await classify_unclassified(knowledge)
     finally:
-        anytype.close()
+        knowledge.close()
 
     if counts["total"] == 0:
         print("Nada a classificar — todos os itens ja tem label.")

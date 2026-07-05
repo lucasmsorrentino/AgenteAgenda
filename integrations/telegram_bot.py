@@ -321,11 +321,22 @@ class ProductivityBot:
             except Exception as e:
                 logger.error("Failed to send message: {}", e)
 
-    async def send_reminder(self, task_id: str, title: str, minutes_until: int) -> None:
-        """Send a reminder with inline buttons."""
+    async def send_reminder(
+        self,
+        task_id: str,
+        title: str,
+        minutes_until: int,
+        priority: str = "C",
+    ) -> None:
+        """Send a reminder with inline buttons.
+
+        Args:
+            priority: A (high), B (medium), or C (normal). Changes the emoji.
+        """
         if not TELEGRAM_CHAT_ID:
             return
-        text = f"⏰ <b>Em {minutes_until} min:</b> {title}"
+        priority_emoji = {"A": "🔴", "B": "🟡", "C": "⏰"}.get(priority, "⏰")
+        text = f"{priority_emoji} <b>Em {minutes_until} min:</b> {title}"
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("✅ Feito", callback_data=f"done:{task_id}"),

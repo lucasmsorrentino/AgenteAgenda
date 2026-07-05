@@ -1,14 +1,14 @@
 """Main entry point — starts the Telegram bot with APScheduler for reminders.
 
 Usage:
-    cd productivity
+    cd AgenteAgenda
     python scripts/run_bot.py
 
 The bot runs in long-polling mode (no public IP needed).
 APScheduler checks for upcoming events every 10 minutes and sends reminders.
 
 Reliability features:
-- Windows file lock prevents multiple instances (avoids Telegram getUpdates conflicts)
+- Linux file lock (fcntl) prevents multiple instances (avoids Telegram getUpdates conflicts)
 - Auto-restart with exponential backoff on crash (up to 5 min cap)
 - Graceful shutdown on SIGINT/SIGTERM
 - All integrations optional (degrades gracefully)
@@ -17,7 +17,7 @@ Reliability features:
 from __future__ import annotations
 
 import asyncio
-import msvcrt
+import fcntl
 import os
 import signal
 import sys
@@ -29,9 +29,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from loguru import logger
 
-from config.settings import ANYTYPE_API_KEY, ANYTYPE_SPACE_ID, TIMEZONE
+from config.settings import TIMEZONE
 
-# --- Windows file lock to prevent multiple instances ---
+# --- Linux file lock to prevent multiple instances ---
 
 LOCK_FILE = Path(__file__).resolve().parent.parent / "data" / "bot.lock"
 _lock_fh = None  # keep file handle open for the lock's lifetime
@@ -40,16 +40,16 @@ _lock_fh = None  # keep file handle open for the lock's lifetime
 def _acquire_lock() -> bool:
     """Acquire an exclusive file lock. Returns True if successful.
 
-    Uses msvcrt.locking() which is a true OS-level lock on Windows.
-    The lock is held as long as the file handle stays open.
-    If another process holds the lock, LK_NBLCK raises IOError immediately.
+    Uses fcntl.flock() on Linux. The lock is held as long as the file
+    handle stays open. If another process holds the lock, this returns
+    False immediately.
     """
     global _lock_fh
     LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         _lock_fh = open(LOCK_FILE, "w")
-        msvcrt.locking(_lock_fh.fileno(), msvcrt.LK_NBLCK, 1)
+        fcntl.flock(_lock_fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         _lock_fh.write(str(os.getpid()))
         _lock_fh.flush()
         logger.info("Lock acquired (PID {})", os.getpid())
@@ -70,7 +70,7 @@ def _release_lock() -> None:
     global _lock_fh
     if _lock_fh:
         try:
-            msvcrt.locking(_lock_fh.fileno(), msvcrt.LK_UNLCK, 1)
+            fcntl.flock(_lock_fh.fileno(), fcntl.LOCK_UN)
             _lock_fh.close()
         except Exception:
             pass
@@ -91,8 +91,8 @@ async def _start_bot() -> None:
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from apscheduler.triggers.interval import IntervalTrigger
 
-    from integrations.anytype_client import AnytypeClient
     from integrations.google_calendar import GoogleCalendarClient
+    from integrations.knowledge import get_knowledge_client
     from integrations.telegram_bot import ProductivityBot
     from services.calendar_sync import sync_calendar_to_anytype
     from services.reminders import check_and_send_reminders
@@ -112,22 +112,15 @@ async def _start_bot() -> None:
             "Google Calendar auth failed: {} — running without calendar", e
         )
 
-    # --- Anytype ---
-    anytype = None
-    if ANYTYPE_API_KEY and ANYTYPE_SPACE_ID:
-        anytype = AnytypeClient()
-        if anytype.verify_connection():
-            logger.info("Anytype: OK")
-        else:
-            logger.warning("Anytype: offline — running without Anytype")
-            anytype = None
-    else:
-        logger.info("Anytype: not configured — skipping")
+    # --- Knowledge store (Obsidian by default; see integrations/knowledge.py) ---
+    knowledge = get_knowledge_client()
+    if knowledge is None:
+        logger.info("Knowledge store: not configured — skipping")
 
     # --- Telegram Bot ---
     bot = ProductivityBot(
         calendar_client=calendar,
-        anytype_client=anytype,
+        anytype_client=knowledge,
     )
 
     # --- APScheduler for reminders (every 10 min) ---
@@ -144,16 +137,16 @@ async def _start_bot() -> None:
         )
         logger.info("Reminder check scheduled every 10 minutes")
 
-    if calendar and anytype:
+    if calendar and knowledge:
         scheduler.add_job(
             sync_calendar_to_anytype,
-            args=[calendar, anytype],
+            args=[calendar, knowledge],
             trigger=IntervalTrigger(hours=6),
             id="calendar_sync",
-            name="Sync Calendar to Anytype",
+            name="Sync Calendar to knowledge store",
             misfire_grace_time=3600,
         )
-        logger.info("Calendar sync scheduled every 6 hours")
+        logger.info("Calendar sync scheduled every 6 hours ({})", knowledge_name)
 
     scheduler.start()
 
@@ -163,8 +156,8 @@ async def _start_bot() -> None:
     finally:
         scheduler.shutdown(wait=False)
         await bot.stop()
-        if anytype:
-            anytype.close()
+        if knowledge:
+            knowledge.close()
         logger.info("Bot stopped.")
 
 
