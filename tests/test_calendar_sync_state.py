@@ -30,7 +30,7 @@ def test_load_current_format_preserved(tmp_path, monkeypatch):
     fake_file = tmp_path / "sync_state.json"
     current = {
         "events": {
-            "g1": {"anytype_id": "a1", "updated": "2026-04-10T12:00:00Z",
+            "g1": {"object_id": "agenda/compromissos/x.md", "updated": "2026-04-10T12:00:00Z",
                    "start_iso": "2026-04-10T12:00:00", "type": "compromisso"}
         },
         "last_sync": "2026-04-10T12:05:00",
@@ -39,8 +39,25 @@ def test_load_current_format_preserved(tmp_path, monkeypatch):
     monkeypatch.setattr("services.calendar_sync.SYNC_STATE_FILE", fake_file)
 
     state = _load_sync_state()
-    assert state["events"]["g1"]["anytype_id"] == "a1"
+    assert state["events"]["g1"]["object_id"] == "agenda/compromissos/x.md"
     assert state["events"]["g1"]["type"] == "compromisso"
+
+
+def test_load_legacy_anytype_id_migrates(tmp_path, monkeypatch):
+    fake_file = tmp_path / "sync_state.json"
+    legacy = {
+        "events": {
+            "g1": {"anytype_id": "a1", "updated": "2026-04-10T12:00:00Z",
+                   "start_iso": "2026-04-10T12:00:00", "type": "compromisso"}
+        },
+        "last_sync": "2026-04-10T12:05:00",
+    }
+    fake_file.write_text(json.dumps(legacy))
+    monkeypatch.setattr("services.calendar_sync.SYNC_STATE_FILE", fake_file)
+
+    state = _load_sync_state()
+    assert state["events"]["g1"]["object_id"] == "a1"
+    assert "anytype_id" not in state["events"]["g1"]
 
 
 def test_load_corrupt_file_returns_default(tmp_path, monkeypatch):
@@ -57,7 +74,7 @@ def test_save_then_load_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr("services.calendar_sync.SYNC_STATE_FILE", fake_file)
 
     state = {
-        "events": {"g1": {"anytype_id": "a1", "updated": "x", "start_iso": "y", "type": "t"}},
+        "events": {"g1": {"object_id": "a1", "updated": "x", "start_iso": "y", "type": "t"}},
         "last_sync": "2026-04-10T12:00:00",
     }
     _save_sync_state(state)

@@ -1,17 +1,21 @@
-"""Calendar → Anytype sync service.
+"""Calendar → knowledge-store sync service.
 
-Mirrors Google Calendar events into Anytype. Calendar is the source of truth;
-Anytype is a queryable read replica.
+Mirrors Google Calendar events into the knowledge store (Obsidian by default;
+see integrations/knowledge.py). Calendar is the source of truth; the store is
+a queryable read replica.
 
-State file (`data/sync_state.json`) maps each Google event ID to the Anytype
-object it was mirrored to, plus the `updated` timestamp from Google. This
-lets us detect three cases on each sync:
-  - new event   → create Anytype object
-  - updated     → patch existing Anytype object (name + description)
-  - cancelled   → delete the Anytype object
+State file (`data/sync_state.json`) maps each Google event ID to the store
+object it was mirrored to (`object_id`), plus the `updated` timestamp from
+Google. This lets us detect three cases on each sync:
+  - new event   → create store object
+  - updated     → patch existing store object (name + description)
+  - cancelled   → delete the store object
 
 Events that fall out of the sync window are left alone (we only delete when
 they were inside the window and Google no longer returns them).
+
+Note: `object_id` was historically called `anytype_id`; _load_sync_state
+migrates the legacy field on read.
 """
 
 from __future__ import annotations
@@ -35,6 +39,10 @@ def _load_sync_state() -> dict:
             # Migrate legacy format ({"synced_event_ids": [...]}) to new map
             if "events" not in data:
                 data = {"events": {}, "last_sync": data.get("last_sync", "")}
+            # Migrate legacy per-entry field anytype_id -> object_id
+            for entry in data.get("events", {}).values():
+                if isinstance(entry, dict) and "anytype_id" in entry:
+                    entry.setdefault("object_id", entry.pop("anytype_id"))
             return data
         except Exception:
             return {"events": {}, "last_sync": ""}
@@ -102,11 +110,11 @@ async def sync_calendar_to_anytype(
             continue
 
         try:
-            if entry and entry.get("anytype_id"):
+            if entry and entry.get("object_id"):
                 # Update existing
                 if entry.get("type") == "compromisso":
                     ok = anytype_client.update_appointment(
-                        entry["anytype_id"],
+                        entry["object_id"],
                         title=ev.title,
                         start_iso=ev.start.isoformat(),
                         end_iso=ev.end.isoformat(),
@@ -115,7 +123,7 @@ async def sync_calendar_to_anytype(
                     )
                 else:
                     ok = anytype_client.update_object(
-                        entry["anytype_id"],
+                        entry["object_id"],
                         name=ev.title,
                         description=_build_description(ev),
                     )
@@ -148,7 +156,7 @@ async def sync_calendar_to_anytype(
 
                 if obj_id:
                     mapping[ev.id] = {
-                        "anytype_id": obj_id,
+                        "object_id": obj_id,
                         "updated": ev.updated,
                         "start_iso": ev.start.isoformat(),
                         "type": type_used,
@@ -179,10 +187,10 @@ async def sync_calendar_to_anytype(
                 start_dt = None
             if start_dt and window_start <= start_dt <= window_end:
                 try:
-                    anytype_client.delete_object(entry["anytype_id"])
+                    anytype_client.delete_object(entry["object_id"])
                     counts["deleted"] += 1
                 except Exception as e:
-                    logger.error("Failed to delete Anytype object {}: {}", entry["anytype_id"], e)
+                    logger.error("Failed to delete store object {}: {}", entry["object_id"], e)
                     counts["errors"] += 1
                 del mapping[gid]
 

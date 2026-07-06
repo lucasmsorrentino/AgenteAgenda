@@ -1328,16 +1328,16 @@ class ProductivityBot:
     def _classify_by_calendar_id_best_effort(
         self, calendar_event_id: str, clean: dict, now_iso: str,
     ) -> None:
-        """Find the Anytype mirror of a just-created calendar event and tag it."""
+        """Find the store mirror of a just-created calendar event and tag it."""
         if not self.anytype:
             return
         try:
             from services.calendar_sync import _load_sync_state
             entry = _load_sync_state().get("events", {}).get(calendar_event_id)
-            if not entry or not entry.get("anytype_id"):
+            if not entry or not entry.get("object_id"):
                 return
             self.anytype.set_classification(
-                entry["anytype_id"],
+                entry["object_id"],
                 area=clean["area"],
                 prioridade=clean["prioridade"],
                 tags=clean["tags"],
