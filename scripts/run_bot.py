@@ -146,7 +146,7 @@ async def _start_bot() -> None:
             name="Sync Calendar to knowledge store",
             misfire_grace_time=3600,
         )
-        logger.info("Calendar sync scheduled every 6 hours ({})", knowledge_name)
+        logger.info("Calendar sync scheduled every 6 hours ({})", type(knowledge).__name__)
 
     scheduler.start()
 
